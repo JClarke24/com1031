@@ -1,0 +1,1079 @@
+
+group_18.elf:     file format elf32-avr
+
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .data         00000000  00800100  00000322  00000396  2**0
+                  CONTENTS, ALLOC, LOAD, DATA
+  1 .text         00000322  00000000  00000000  00000074  2**1
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  2 .stab         00001140  00000000  00000000  00000398  2**2
+                  CONTENTS, READONLY, DEBUGGING
+  3 .stabstr      00000033  00000000  00000000  000014d8  2**0
+                  CONTENTS, READONLY, DEBUGGING
+
+Disassembly of section .text:
+
+00000000 <reset_v>:
+   0:	1c c0       	rjmp	.+56     	; 0x3a <init>
+	...
+
+00000028 <timer1_cpt_v>:
+  28:	0c 94 50 00 	jmp	0xa0	; 0xa0 <timer1_cpt_isr>
+
+0000002c <timer1_compa_v>:
+  2c:	0c 94 3d 00 	jmp	0x7a	; 0x7a <timer1_compa_isr>
+  30:	00 00       	nop
+	...
+
+00000034 <timer1_ovr_v>:
+  34:	0c 94 1c 00 	jmp	0x38	; 0x38 <timer1_ovr_isr>
+
+00000038 <timer1_ovr_isr>:
+  38:	18 95       	reti
+
+0000003a <init>:
+  3a:	08 e0       	ldi	r16, 0x08	; 8
+  3c:	0e bf       	out	0x3e, r16	; 62
+  3e:	0f ef       	ldi	r16, 0xFF	; 255
+  40:	0d bf       	out	0x3d, r16	; 61
+  42:	00 e0       	ldi	r16, 0x00	; 0
+  44:	00 93 c1 00 	sts	0x00C1, r16
+  48:	0c 94 26 00 	jmp	0x4c	; 0x4c <__ctors_end>
+
+0000004c <__ctors_end>:
+;;; max value while a button has been held pressed.
+	
+	.global main
+main:	
+	;; output/counter setup
+	ldi r20, 0x00		;setting up the register that will be used
+  4c:	40 e0       	ldi	r20, 0x00	; 0
+	ldi r21, 0x00
+  4e:	50 e0       	ldi	r21, 0x00	; 0
+	clr r25
+  50:	99 27       	eor	r25, r25
+	clr r22
+  52:	66 27       	eor	r22, r22
+
+	;; setup for button, DDRB0 is automatically an input.
+	sbi PORTB, BUTTON 	; switch on the pull-up. Released
+  54:	28 9a       	sbi	0x05, 0	; 5
+				; button is 1, depressed button read as 0.
+
+	;; setup the timer ([ATmega328p], Section 15.11.1, p126)
+
+	clr r16
+  56:	00 27       	eor	r16, r16
+	sts TCCR1A, r16 	; setting timer output mode: no output
+  58:	00 93 80 00 	sts	0x0080, r16
+				; pin used, normal counting up. 
+
+	ldi r16, TIMEOUT	; time in 16ms ticks to detect a TIMEOUT,
+  5c:	08 e1       	ldi	r16, 0x18	; 24
+				; about 400ms.
+				; long and short button presses. 
+	sts OCR1AH, r16		; move into high byte of compare match
+  5e:	00 93 89 00 	sts	0x0089, r16
+				; register A
+	
+	clr r16			; low byte of compare match is just 0.
+  62:	00 27       	eor	r16, r16
+	sts OCR1AL, r16         ; note 16bit registers always have to
+  64:	00 93 88 00 	sts	0x0088, r16
+				; be written high byte first, see
+				; [ATmega328p], Chapter 15.3, p 106
+
+	;; enable input capture interrupt (to time button presses) and
+	;; compare match interrupt (the time-out to display letter:
+	ldi r16, _BV(ICIE1) | _BV(OCIE1A)
+  68:	02 e2       	ldi	r16, 0x22	; 34
+	sts TIMSK1, r16
+  6a:	00 93 6f 00 	sts	0x006F, r16
+
+	;; enable noise canceller, set prescaler to 1024, and start
+	;; timer in CTC mode, [ATmega328p] section  15.11.2, p128
+ 
+	ldi r16,  _BV(ICNC1) | _BV(CS12) | _BV(CS10) | _BV(WGM12)
+  6e:	0d e8       	ldi	r16, 0x8D	; 141
+	sts TCCR1B, r16
+  70:	00 93 81 00 	sts	0x0081, r16
+
+	clr r19			; reset overflow flag to defined state
+  74:	33 27       	eor	r19, r19
+
+	sei			; enable interrupts globally.
+  76:	78 94       	sei
+
+00000078 <fourE4>:
+
+fourE4:	rjmp fourE4 		; do nothing :-) just wait for the
+  78:	ff cf       	rjmp	.-2      	; 0x78 <fourE4>
+
+0000007a <timer1_compa_isr>:
+	.global timer1_compa_isr  ; export symbol to overwrite weak
+				; definition in init.S
+	
+timer1_compa_isr:			
+
+	push r16	
+  7a:	0f 93       	push	r16
+	in r16, SREG		; save the status register.
+  7c:	0f b7       	in	r16, 0x3f	; 63
+	push r16
+  7e:	0f 93       	push	r16
+
+	;; check whether we are waiting for a button press or release:
+	lds r16, TCCR1B
+  80:	00 91 81 00 	lds	r16, 0x0081
+	sbrs r16, ICES1 	; skip if waiting for postive edge (ie for button release)
+  84:	06 ff       	sbrs	r16, 6
+	rjmp awaiting_press
+  86:	02 c0       	rjmp	.+4      	; 0x8c <awaiting_press>
+
+00000088 <awaiting_release>:
+
+awaiting_release:
+	;;  make sure also an overly long press is always recognised
+	;;  as a long press, irrespective of a timer overrun:
+
+	ser r19 		; using r19 as a flag to indicate a
+  88:	3f ef       	ldi	r19, 0xFF	; 255
+				; timer overflow has occured.
+	rjmp 1f
+  8a:	06 c0       	rjmp	.+12     	; 0x98 <CHAR_M+0x4>
+
+0000008c <awaiting_press>:
+awaiting_press:	
+	;; if we are waiting for a button press, then more time than
+	;; TIME-OUT has elasped since the last release -- in this case
+	;; we display letter and reset counters
+		
+	ldi r16, _BV(BUTTON)	
+  8c:	01 e0       	ldi	r16, 0x01	; 1
+				
+	out PORTB, r16		;reset button
+  8e:	05 b9       	out	0x05, r16	; 5
+	out DDRD, r25		;display letter
+  90:	9a b9       	out	0x0a, r25	; 10
+	clr r20			;clear dot counter
+  92:	44 27       	eor	r20, r20
+	clr r21			;clear dash counter
+  94:	55 27       	eor	r21, r21
+	clr r22			;clear total counter
+  96:	66 27       	eor	r22, r22
+	
+1:	pop r16
+  98:	0f 91       	pop	r16
+	out SREG, r16 		;restore status register
+  9a:	0f bf       	out	0x3f, r16	; 63
+	pop r16
+  9c:	0f 91       	pop	r16
+	
+	reti
+  9e:	18 95       	reti
+
+000000a0 <timer1_cpt_isr>:
+	
+	.global timer1_cpt_isr
+
+timer1_cpt_isr:
+
+	push r8
+  a0:	8f 92       	push	r8
+
+	in r8, SREG 		; save the status register.
+  a2:	8f b6       	in	r8, 0x3f	; 63
+	push r8
+  a4:	8f 92       	push	r8
+
+	lds r8, ICR1L		; get the timer count when the capture event happened.
+  a6:	80 90 86 00 	lds	r8, 0x0086
+	lds r8, ICR1H           ; we discard the low part, only
+  aa:	80 90 87 00 	lds	r8, 0x0087
+				; interested in the high part, but
+				; reading low byte is necessary to get
+				; a correct high byte in ICR1H, see
+				; documentation [ATmega328p] Section 15.3 p106
+	push r17				
+  ae:	1f 93       	push	r17
+
+
+	or r17, r8
+  b0:	18 29       	or	r17, r8
+
+	mov r17,r19		;  debounce. If there is no timer overflow and
+  b2:	13 2f       	mov	r17, r19
+	or r17,r8		;  ICR1H is still zero, then 
+  b4:	18 29       	or	r17, r8
+				;  less than 16ms have elapsed since
+				;  last release or press
+	breq debounce		;  and we do nothing
+  b6:	79 f0       	breq	.+30     	; 0xd6 <debounce>
+
+
+
+	clr r17
+  b8:	11 27       	eor	r17, r17
+	sts TCNT1H, r17 	; reset timer, first writing the high byte to the latch
+  ba:	10 93 85 00 	sts	0x0085, r17
+	sts TCNT1L, r17		; then the low byte -- Section 15.11.4 of [ATmega328p] p130.
+  be:	10 93 84 00 	sts	0x0084, r17
+
+	;; check whether we were looking for a positive or a negative edge:
+	lds r17, TCCR1B
+  c2:	10 91 81 00 	lds	r17, 0x0081
+	sbrs  r17, ICES1	; skip next instruction if positive edge dedection.
+  c6:	16 ff       	sbrs	r17, 6
+	
+	rjmp pressed		; we have a negative edge ie button
+  c8:	03 c0       	rjmp	.+6      	; 0xd0 <pressed>
+				; has been pressed
+
+	;; positive edge, button has been released
+	rcall released
+  ca:	0a d0       	rcall	.+20     	; 0xe0 <released>
+
+	andi r17, ~(_BV(ICES1)) ; we have had positive edge, so next
+  cc:	1f 7b       	andi	r17, 0xBF	; 191
+				; time looking for negative edge
+	rjmp end_isr
+  ce:	01 c0       	rjmp	.+2      	; 0xd2 <end_isr>
+
+000000d0 <pressed>:
+
+	
+pressed:
+
+	ori r17, _BV(ICES1)	; next time detect positive edge, ie a
+  d0:	10 64       	ori	r17, 0x40	; 64
+
+000000d2 <end_isr>:
+				; button release.
+
+end_isr:
+	sts TCCR1B, r17 	; write r17 to TCCR1B to activate the
+  d2:	10 93 81 00 	sts	0x0081, r17
+
+000000d6 <debounce>:
+				; change in edge detection.
+	
+debounce:
+	pop r17
+  d6:	1f 91       	pop	r17
+	pop r8
+  d8:	8f 90       	pop	r8
+	out SREG, r8		; restore status register
+  da:	8f be       	out	0x3f, r8	; 63
+	pop r8
+  dc:	8f 90       	pop	r8
+
+	reti
+  de:	18 95       	reti
+
+000000e0 <released>:
+;;; It expects the durations of button presses in 16ms ticks in r8
+
+
+released:
+
+	push r16
+  e0:	0f 93       	push	r16
+
+	tst r19 		; Did we have a timer overflow
+  e2:	33 23       	and	r19, r19
+				; (ie more than TIMEOUT time since the
+				; last released of the button?
+	brne long_press		; if yes, then signal is a long
+  e4:	19 f4       	brne	.+6      	; 0xec <long_press>
+				; press in any case
+
+	;; is the signal longer then DECISION_LIMIT?
+	ldi r16, DECISION_LIMIT
+  e6:	0c e0       	ldi	r16, 0x0C	; 12
+	cp r8,r16
+  e8:	80 16       	cp	r8, r16
+	brcs short_press		; if it is shorter jump to label short
+  ea:	a8 f0       	brcs	.+42     	; 0x116 <short_press>
+
+000000ec <long_press>:
+
+
+	
+long_press:
+	clr r25			
+  ec:	99 27       	eor	r25, r25
+	out DDRD, r25		;clears display
+  ee:	9a b9       	out	0x0a, r25	; 10
+	ldi r16, _BV(BUTTON)	
+  f0:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		;reset button
+  f2:	05 b9       	out	0x05, r16	; 5
+	clr r22
+  f4:	66 27       	eor	r22, r22
+	add r22, r20		;clear total counter and add both dot and dash counter to it
+  f6:	64 0f       	add	r22, r20
+	add r22, r21
+  f8:	65 0f       	add	r22, r21
+	cpi r22, 0x01		;check if total counter is 1 (if this is the second signal)
+  fa:	61 30       	cpi	r22, 0x01	; 1
+	breq 1f			
+  fc:	31 f0       	breq	.+12     	; 0x10a <ALL_SEGS+0xc>
+	cpi r22, 0x03		;check if total counter is 3 (if this is the third signal)
+  fe:	63 30       	cpi	r22, 0x03	; 3
+	breq 2f
+ 100:	31 f0       	breq	.+12     	; 0x10e <ALL_SEGS+0x10>
+	cpi r22, 0x07		;check if total counter is 7 (if this is the fourth signal)
+ 102:	67 30       	cpi	r22, 0x07	; 7
+	breq 3f
+ 104:	31 f0       	breq	.+12     	; 0x112 <ALL_SEGS+0x14>
+	inc r21			;if its the first signal, increment dash counter
+ 106:	53 95       	inc	r21
+	rjmp checkE
+ 108:	1b c0       	rjmp	.+54     	; 0x140 <checkE>
+
+1:
+	ori r21, 0x02		;for second signal, set the second bit value of dash counter
+ 10a:	52 60       	ori	r21, 0x02	; 2
+	rjmp checkE
+ 10c:	19 c0       	rjmp	.+50     	; 0x140 <checkE>
+
+2:
+	ori r21, 0x04		;for third signal, set the third bit value of dash counter
+ 10e:	54 60       	ori	r21, 0x04	; 4
+	rjmp checkE
+ 110:	17 c0       	rjmp	.+46     	; 0x140 <checkE>
+
+3:	ori r21, 0x08		;for fourth signal, set the fourth bit value of dash counter
+ 112:	58 60       	ori	r21, 0x08	; 8
+	rjmp checkE
+ 114:	15 c0       	rjmp	.+42     	; 0x140 <checkE>
+
+00000116 <short_press>:
+	
+short_press:
+	clr r25
+ 116:	99 27       	eor	r25, r25
+	out DDRD, r25		;clears display
+ 118:	9a b9       	out	0x0a, r25	; 10
+	ldi r16, _BV(BUTTON)
+ 11a:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		;reset button
+ 11c:	05 b9       	out	0x05, r16	; 5
+	clr r22
+ 11e:	66 27       	eor	r22, r22
+	add r22, r20		;clear total counter and add both dot and dash counter to it
+ 120:	64 0f       	add	r22, r20
+	add r22, r21
+ 122:	65 0f       	add	r22, r21
+	cpi r22, 0x01		;check if total counter is 1 (if this is the second signal)
+ 124:	61 30       	cpi	r22, 0x01	; 1
+	breq 1f
+ 126:	31 f0       	breq	.+12     	; 0x134 <short_press+0x1e>
+	cpi r22, 0x03		;check if total counter is 3 (if this is the third signal)
+ 128:	63 30       	cpi	r22, 0x03	; 3
+	breq 2f
+ 12a:	31 f0       	breq	.+12     	; 0x138 <short_press+0x22>
+	cpi r22, 0x07		;check if total counter is 7 (if this is the fourth signal)
+ 12c:	67 30       	cpi	r22, 0x07	; 7
+	breq 3f
+ 12e:	31 f0       	breq	.+12     	; 0x13c <short_press+0x26>
+	inc r20			;if its the first signal, increment dot counter
+ 130:	43 95       	inc	r20
+	rjmp checkE
+ 132:	06 c0       	rjmp	.+12     	; 0x140 <checkE>
+
+1:
+	ori r20, 0x02		;for second signal, set the second bit value of dot counter
+ 134:	42 60       	ori	r20, 0x02	; 2
+	rjmp checkE
+ 136:	04 c0       	rjmp	.+8      	; 0x140 <checkE>
+
+2:
+	ori r20, 0x04		;for third signal, set the second bit value of dot counter
+ 138:	44 60       	ori	r20, 0x04	; 4
+	rjmp checkE
+ 13a:	02 c0       	rjmp	.+4      	; 0x140 <checkE>
+
+3:	ori r20, 0x08		;for fourth signal, set the second bit value of dot counter
+ 13c:	48 60       	ori	r20, 0x08	; 8
+	rjmp checkE
+ 13e:	00 c0       	rjmp	.+0      	; 0x140 <checkE>
+
+00000140 <checkE>:
+	
+checkE:
+	cpi r20, 0x01		;checks if counter combination matches
+ 140:	41 30       	cpi	r20, 0x01	; 1
+	brne checkT		;the signal combination for morse code A
+ 142:	39 f4       	brne	.+14     	; 0x152 <checkT>
+	cpi r21, 0x00		; if not, check next letter
+ 144:	50 30       	cpi	r21, 0x00	; 0
+	brne checkT
+ 146:	29 f4       	brne	.+10     	; 0x152 <checkT>
+
+00000148 <combinationE>:
+
+combinationE:
+	ldi r16, _BV(BUTTON)	
+ 148:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		;reset button
+ 14a:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 14c:	99 27       	eor	r25, r25
+	ldi r25, CHAR_E		;loads CHAR_E into register
+ 14e:	98 ef       	ldi	r25, 0xF8	; 248
+	rjmp finish
+ 150:	e5 c0       	rjmp	.+458    	; 0x31c <finish>
+
+00000152 <checkT>:
+
+checkT:
+	cpi r20, 0x00	     	;checks if counter combination matches
+ 152:	40 30       	cpi	r20, 0x00	; 0
+	brne checkA		;the signal combination for morse code A
+ 154:	39 f4       	brne	.+14     	; 0x164 <checkA>
+	cpi r21, 0x01		; if not, check next letter
+ 156:	51 30       	cpi	r21, 0x01	; 1
+	brne checkA
+ 158:	29 f4       	brne	.+10     	; 0x164 <checkA>
+
+0000015a <combinationT>:
+
+combinationT:
+	ldi r16, _BV(BUTTON)
+ 15a:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		;reset button
+ 15c:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 15e:	99 27       	eor	r25, r25
+	ldi r25, CHAR_T		;loads CHAR_T into register
+ 160:	98 e7       	ldi	r25, 0x78	; 120
+	rjmp finish
+ 162:	dc c0       	rjmp	.+440    	; 0x31c <finish>
+
+00000164 <checkA>:
+
+checkA:				;REPEAT THIS FOR EVERY LETTER
+	cpi r20, 0x01		
+ 164:	41 30       	cpi	r20, 0x01	; 1
+	brne checkN		
+ 166:	39 f4       	brne	.+14     	; 0x176 <checkN>
+	cpi r21, 0x02		
+ 168:	52 30       	cpi	r21, 0x02	; 2
+	brne checkN
+ 16a:	29 f4       	brne	.+10     	; 0x176 <checkN>
+
+0000016c <combinationA>:
+
+combinationA:
+	ldi r16, _BV(BUTTON)	
+ 16c:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		
+ 16e:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 170:	99 27       	eor	r25, r25
+	ldi r25, CHAR_A		
+ 172:	96 ef       	ldi	r25, 0xF6	; 246
+	rjmp finish
+ 174:	d3 c0       	rjmp	.+422    	; 0x31c <finish>
+
+00000176 <checkN>:
+
+checkN:
+	cpi r20, 0x02		
+ 176:	42 30       	cpi	r20, 0x02	; 2
+	brne checkI		
+ 178:	39 f4       	brne	.+14     	; 0x188 <checkI>
+	cpi r21, 0x01		
+ 17a:	51 30       	cpi	r21, 0x01	; 1
+	brne checkI
+ 17c:	29 f4       	brne	.+10     	; 0x188 <checkI>
+
+0000017e <combinationN>:
+
+combinationN:
+	ldi r16, _BV(BUTTON)	
+ 17e:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		
+ 180:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 182:	99 27       	eor	r25, r25
+	ldi r25, CHAR_N		
+ 184:	94 e5       	ldi	r25, 0x54	; 84
+	rjmp finish
+ 186:	ca c0       	rjmp	.+404    	; 0x31c <finish>
+
+00000188 <checkI>:
+
+checkI:
+	cpi r20, 0x03	     	
+ 188:	43 30       	cpi	r20, 0x03	; 3
+	brne checkM		
+ 18a:	39 f4       	brne	.+14     	; 0x19a <checkM>
+	cpi r21, 0x00		
+ 18c:	50 30       	cpi	r21, 0x00	; 0
+	brne checkM
+ 18e:	29 f4       	brne	.+10     	; 0x19a <checkM>
+
+00000190 <combinationI>:
+
+combinationI:
+	ldi r16, _BV(BUTTON)
+ 190:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		
+ 192:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 194:	99 27       	eor	r25, r25
+	ldi r25, CHAR_I		
+ 196:	96 e0       	ldi	r25, 0x06	; 6
+	rjmp finish
+ 198:	c1 c0       	rjmp	.+386    	; 0x31c <finish>
+
+0000019a <checkM>:
+
+
+checkM:	cpi r20, 0x00	    	
+ 19a:	40 30       	cpi	r20, 0x00	; 0
+	brne checkD		
+ 19c:	39 f4       	brne	.+14     	; 0x1ac <checkD>
+	cpi r21, 0x03		
+ 19e:	53 30       	cpi	r21, 0x03	; 3
+	brne checkD		
+ 1a0:	29 f4       	brne	.+10     	; 0x1ac <checkD>
+
+000001a2 <combinationM>:
+
+combinationM:
+	ldi r16, _BV(BUTTON)
+ 1a2:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16		
+ 1a4:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 1a6:	99 27       	eor	r25, r25
+	ldi r25, CHAR_M		
+ 1a8:	94 e9       	ldi	r25, 0x94	; 148
+	rjmp finish
+ 1aa:	b8 c0       	rjmp	.+368    	; 0x31c <finish>
+
+000001ac <checkD>:
+
+checkD:	cpi r20, 0x06
+ 1ac:	46 30       	cpi	r20, 0x06	; 6
+	brne checkG
+ 1ae:	39 f4       	brne	.+14     	; 0x1be <checkG>
+	cpi r21, 0x01
+ 1b0:	51 30       	cpi	r21, 0x01	; 1
+	brne checkG
+ 1b2:	29 f4       	brne	.+10     	; 0x1be <checkG>
+
+000001b4 <combinationD>:
+
+combinationD:
+	ldi r16, _BV(BUTTON)
+ 1b4:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 1b6:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 1b8:	99 27       	eor	r25, r25
+	ldi r25, CHAR_D
+ 1ba:	9e e5       	ldi	r25, 0x5E	; 94
+	rjmp finish
+ 1bc:	af c0       	rjmp	.+350    	; 0x31c <finish>
+
+000001be <checkG>:
+
+checkG:	cpi r20, 0x04
+ 1be:	44 30       	cpi	r20, 0x04	; 4
+	brne checkK
+ 1c0:	39 f4       	brne	.+14     	; 0x1d0 <checkK>
+	cpi r21, 0x03
+ 1c2:	53 30       	cpi	r21, 0x03	; 3
+	brne checkK
+ 1c4:	29 f4       	brne	.+10     	; 0x1d0 <checkK>
+
+000001c6 <combinationG>:
+
+combinationG:
+	ldi r16, _BV(BUTTON)
+ 1c6:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 1c8:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 1ca:	99 27       	eor	r25, r25
+	ldi r25, CHAR_G
+ 1cc:	9e ee       	ldi	r25, 0xEE	; 238
+	rjmp finish
+ 1ce:	a6 c0       	rjmp	.+332    	; 0x31c <finish>
+
+000001d0 <checkK>:
+
+checkK:	cpi r20, 0x02
+ 1d0:	42 30       	cpi	r20, 0x02	; 2
+	brne checkO
+ 1d2:	39 f4       	brne	.+14     	; 0x1e2 <checkO>
+	cpi r21, 0x05
+ 1d4:	55 30       	cpi	r21, 0x05	; 5
+	brne checkO
+ 1d6:	29 f4       	brne	.+10     	; 0x1e2 <checkO>
+
+000001d8 <combinationK>:
+
+combinationK:
+	ldi r16, _BV(BUTTON)
+ 1d8:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 1da:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 1dc:	99 27       	eor	r25, r25
+	ldi r25, CHAR_K
+ 1de:	9a e7       	ldi	r25, 0x7A	; 122
+	rjmp finish
+ 1e0:	9d c0       	rjmp	.+314    	; 0x31c <finish>
+
+000001e2 <checkO>:
+
+checkO:	cpi r20, 0x00
+ 1e2:	40 30       	cpi	r20, 0x00	; 0
+	brne checkR
+ 1e4:	39 f4       	brne	.+14     	; 0x1f4 <checkR>
+	cpi r21, 0x07
+ 1e6:	57 30       	cpi	r21, 0x07	; 7
+	brne checkR
+ 1e8:	29 f4       	brne	.+10     	; 0x1f4 <checkR>
+
+000001ea <combinationO>:
+
+combinationO:
+	ldi r16, _BV(BUTTON)
+ 1ea:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 1ec:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 1ee:	99 27       	eor	r25, r25
+	ldi r25, CHAR_O
+ 1f0:	9e eb       	ldi	r25, 0xBE	; 190
+	rjmp finish
+ 1f2:	94 c0       	rjmp	.+296    	; 0x31c <finish>
+
+000001f4 <checkR>:
+
+checkR:	cpi r20, 0x05
+ 1f4:	45 30       	cpi	r20, 0x05	; 5
+	brne checkS
+ 1f6:	39 f4       	brne	.+14     	; 0x206 <checkS>
+	cpi r21, 0x02
+ 1f8:	52 30       	cpi	r21, 0x02	; 2
+	brne checkS
+ 1fa:	29 f4       	brne	.+10     	; 0x206 <checkS>
+
+000001fc <combinationR>:
+
+combinationR:
+	ldi r16, _BV(BUTTON)
+ 1fc:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 1fe:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 200:	99 27       	eor	r25, r25
+	ldi r25, CHAR_R
+ 202:	90 e5       	ldi	r25, 0x50	; 80
+	rjmp finish
+ 204:	8b c0       	rjmp	.+278    	; 0x31c <finish>
+
+00000206 <checkS>:
+
+checkS:	cpi r20, 0x07
+ 206:	47 30       	cpi	r20, 0x07	; 7
+	brne checkU
+ 208:	39 f4       	brne	.+14     	; 0x218 <checkU>
+	cpi r21, 0x00
+ 20a:	50 30       	cpi	r21, 0x00	; 0
+	brne checkU
+ 20c:	29 f4       	brne	.+10     	; 0x218 <checkU>
+
+0000020e <combinationS>:
+
+combinationS:	
+	ldi r16, _BV(BUTTON)
+ 20e:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 210:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 212:	99 27       	eor	r25, r25
+	ldi r25, CHAR_S
+ 214:	9c ee       	ldi	r25, 0xEC	; 236
+	rjmp finish
+ 216:	82 c0       	rjmp	.+260    	; 0x31c <finish>
+
+00000218 <checkU>:
+
+checkU:	cpi r20,0x03
+ 218:	43 30       	cpi	r20, 0x03	; 3
+	brne checkW
+ 21a:	39 f4       	brne	.+14     	; 0x22a <checkW>
+	cpi r21, 0x04
+ 21c:	54 30       	cpi	r21, 0x04	; 4
+	brne checkW
+ 21e:	29 f4       	brne	.+10     	; 0x22a <checkW>
+
+00000220 <combinationU>:
+
+combinationU:	
+	ldi r16, _BV(BUTTON)
+ 220:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 222:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 224:	99 27       	eor	r25, r25
+	ldi r25, CHAR_U
+ 226:	9e e3       	ldi	r25, 0x3E	; 62
+	rjmp finish
+ 228:	79 c0       	rjmp	.+242    	; 0x31c <finish>
+
+0000022a <checkW>:
+
+checkW:	cpi r20, 0x01
+ 22a:	41 30       	cpi	r20, 0x01	; 1
+	brne checkB
+ 22c:	39 f4       	brne	.+14     	; 0x23c <checkB>
+	cpi r21, 0x06
+ 22e:	56 30       	cpi	r21, 0x06	; 6
+	brne checkB
+ 230:	29 f4       	brne	.+10     	; 0x23c <checkB>
+
+00000232 <combinationW>:
+
+combinationW:	
+	ldi r16, _BV(BUTTON)
+ 232:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 234:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 236:	99 27       	eor	r25, r25
+	ldi r25, CHAR_W
+ 238:	9a e2       	ldi	r25, 0x2A	; 42
+	rjmp finish
+ 23a:	70 c0       	rjmp	.+224    	; 0x31c <finish>
+
+0000023c <checkB>:
+
+checkB:	cpi r20, 0x0e
+ 23c:	4e 30       	cpi	r20, 0x0E	; 14
+	brne checkC
+ 23e:	39 f4       	brne	.+14     	; 0x24e <checkC>
+	cpi r21, 0x01
+ 240:	51 30       	cpi	r21, 0x01	; 1
+	brne checkC
+ 242:	29 f4       	brne	.+10     	; 0x24e <checkC>
+
+00000244 <combinationB>:
+
+combinationB:
+	ldi r16, _BV(BUTTON)
+ 244:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 246:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 248:	99 27       	eor	r25, r25
+	ldi r25, CHAR_B
+ 24a:	9c e7       	ldi	r25, 0x7C	; 124
+	rjmp finish
+ 24c:	67 c0       	rjmp	.+206    	; 0x31c <finish>
+
+0000024e <checkC>:
+	
+checkC:	cpi r20, 0x0a
+ 24e:	4a 30       	cpi	r20, 0x0A	; 10
+	brne checkF
+ 250:	39 f4       	brne	.+14     	; 0x260 <checkF>
+	cpi r21, 0x05
+ 252:	55 30       	cpi	r21, 0x05	; 5
+	brne checkF
+ 254:	29 f4       	brne	.+10     	; 0x260 <checkF>
+
+00000256 <combinationC>:
+
+combinationC:
+	ldi r16, _BV(BUTTON)
+ 256:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 258:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 25a:	99 27       	eor	r25, r25
+	ldi r25, CHAR_C
+ 25c:	98 eb       	ldi	r25, 0xB8	; 184
+	rjmp finish
+ 25e:	5e c0       	rjmp	.+188    	; 0x31c <finish>
+
+00000260 <checkF>:
+
+checkF:	cpi r20, 0x0b
+ 260:	4b 30       	cpi	r20, 0x0B	; 11
+	brne checkH
+ 262:	39 f4       	brne	.+14     	; 0x272 <checkH>
+	cpi r21, 0x04
+ 264:	54 30       	cpi	r21, 0x04	; 4
+	brne checkH
+ 266:	29 f4       	brne	.+10     	; 0x272 <checkH>
+
+00000268 <combinationF>:
+
+combinationF:	
+	ldi r16, _BV(BUTTON)
+ 268:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 26a:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 26c:	99 27       	eor	r25, r25
+	ldi r25, CHAR_F
+ 26e:	90 ef       	ldi	r25, 0xF0	; 240
+	rjmp finish
+ 270:	55 c0       	rjmp	.+170    	; 0x31c <finish>
+
+00000272 <checkH>:
+
+checkH:	cpi r20, 0x0f
+ 272:	4f 30       	cpi	r20, 0x0F	; 15
+	brne checkJ
+ 274:	39 f4       	brne	.+14     	; 0x284 <checkJ>
+	cpi r21, 0x00
+ 276:	50 30       	cpi	r21, 0x00	; 0
+	brne checkJ
+ 278:	29 f4       	brne	.+10     	; 0x284 <checkJ>
+
+0000027a <combinationH>:
+
+combinationH:	
+	ldi r16, _BV(BUTTON)
+ 27a:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 27c:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 27e:	99 27       	eor	r25, r25
+	ldi r25, CHAR_H
+ 280:	94 e7       	ldi	r25, 0x74	; 116
+	rjmp finish
+ 282:	4c c0       	rjmp	.+152    	; 0x31c <finish>
+
+00000284 <checkJ>:
+
+checkJ:	cpi r20, 0x01
+ 284:	41 30       	cpi	r20, 0x01	; 1
+	brne checkL
+ 286:	39 f4       	brne	.+14     	; 0x296 <checkL>
+	cpi r21, 0x0e
+ 288:	5e 30       	cpi	r21, 0x0E	; 14
+	brne checkL
+ 28a:	29 f4       	brne	.+10     	; 0x296 <checkL>
+
+0000028c <combinationJ>:
+
+combinationJ:	
+	ldi r16, _BV(BUTTON)
+ 28c:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 28e:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 290:	99 27       	eor	r25, r25
+	ldi r25, CHAR_J
+ 292:	9e e0       	ldi	r25, 0x0E	; 14
+	rjmp finish
+ 294:	43 c0       	rjmp	.+134    	; 0x31c <finish>
+
+00000296 <checkL>:
+
+checkL:	cpi r20, 0x0d
+ 296:	4d 30       	cpi	r20, 0x0D	; 13
+	brne checkP
+ 298:	39 f4       	brne	.+14     	; 0x2a8 <checkP>
+	cpi r21, 0x02
+ 29a:	52 30       	cpi	r21, 0x02	; 2
+	brne checkP
+ 29c:	29 f4       	brne	.+10     	; 0x2a8 <checkP>
+
+0000029e <combinationL>:
+
+combinationL:	
+	ldi r16, _BV(BUTTON)
+ 29e:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 2a0:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 2a2:	99 27       	eor	r25, r25
+	ldi r25, CHAR_L
+ 2a4:	98 e3       	ldi	r25, 0x38	; 56
+	rjmp finish
+ 2a6:	3a c0       	rjmp	.+116    	; 0x31c <finish>
+
+000002a8 <checkP>:
+
+checkP:	cpi r20, 0x09
+ 2a8:	49 30       	cpi	r20, 0x09	; 9
+	brne checkQ
+ 2aa:	39 f4       	brne	.+14     	; 0x2ba <checkQ>
+	cpi r21, 0x06
+ 2ac:	56 30       	cpi	r21, 0x06	; 6
+	brne checkQ
+ 2ae:	29 f4       	brne	.+10     	; 0x2ba <checkQ>
+
+000002b0 <combinationP>:
+
+combinationP:	
+	ldi r16, _BV(BUTTON)
+ 2b0:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 2b2:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 2b4:	99 27       	eor	r25, r25
+	ldi r25, CHAR_P
+ 2b6:	92 ef       	ldi	r25, 0xF2	; 242
+	rjmp finish
+ 2b8:	31 c0       	rjmp	.+98     	; 0x31c <finish>
+
+000002ba <checkQ>:
+
+checkQ:	cpi r20, 0x04
+ 2ba:	44 30       	cpi	r20, 0x04	; 4
+	brne checkV
+ 2bc:	39 f4       	brne	.+14     	; 0x2cc <checkV>
+	cpi r21, 0x0b
+ 2be:	5b 30       	cpi	r21, 0x0B	; 11
+	brne checkV
+ 2c0:	29 f4       	brne	.+10     	; 0x2cc <checkV>
+
+000002c2 <combinationQ>:
+
+combinationQ:	
+	ldi r16, _BV(BUTTON)
+ 2c2:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 2c4:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 2c6:	99 27       	eor	r25, r25
+	ldi r25, CHAR_Q
+ 2c8:	96 ee       	ldi	r25, 0xE6	; 230
+	rjmp finish
+ 2ca:	28 c0       	rjmp	.+80     	; 0x31c <finish>
+
+000002cc <checkV>:
+
+checkV:	cpi r20, 0x07
+ 2cc:	47 30       	cpi	r20, 0x07	; 7
+	brne checkX
+ 2ce:	39 f4       	brne	.+14     	; 0x2de <checkX>
+	cpi r21, 0x08
+ 2d0:	58 30       	cpi	r21, 0x08	; 8
+	brne checkX
+ 2d2:	29 f4       	brne	.+10     	; 0x2de <checkX>
+
+000002d4 <combinationV>:
+
+combinationV:	
+	ldi r16, _BV(BUTTON)
+ 2d4:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 2d6:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 2d8:	99 27       	eor	r25, r25
+	ldi r25, CHAR_V
+ 2da:	92 e6       	ldi	r25, 0x62	; 98
+	rjmp finish
+ 2dc:	1f c0       	rjmp	.+62     	; 0x31c <finish>
+
+000002de <checkX>:
+
+checkX:	cpi r20, 0x06
+ 2de:	46 30       	cpi	r20, 0x06	; 6
+	brne checkY
+ 2e0:	39 f4       	brne	.+14     	; 0x2f0 <checkY>
+	cpi r21, 0x09
+ 2e2:	59 30       	cpi	r21, 0x09	; 9
+	brne checkY
+ 2e4:	29 f4       	brne	.+10     	; 0x2f0 <checkY>
+
+000002e6 <combinationX>:
+
+combinationX:	
+	ldi r16, _BV(BUTTON)
+ 2e6:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 2e8:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 2ea:	99 27       	eor	r25, r25
+	ldi r25, CHAR_X
+ 2ec:	96 e7       	ldi	r25, 0x76	; 118
+	rjmp finish
+ 2ee:	16 c0       	rjmp	.+44     	; 0x31c <finish>
+
+000002f0 <checkY>:
+
+checkY:	cpi r20, 0x02
+ 2f0:	42 30       	cpi	r20, 0x02	; 2
+	brne checkZ
+ 2f2:	39 f4       	brne	.+14     	; 0x302 <checkZ>
+	cpi r21, 0x0d
+ 2f4:	5d 30       	cpi	r21, 0x0D	; 13
+	brne checkZ
+ 2f6:	29 f4       	brne	.+10     	; 0x302 <checkZ>
+
+000002f8 <combinationY>:
+
+combinationY:	
+	ldi r16, _BV(BUTTON)
+ 2f8:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 2fa:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 2fc:	99 27       	eor	r25, r25
+	ldi r25, CHAR_Y
+ 2fe:	9e e6       	ldi	r25, 0x6E	; 110
+	rjmp finish
+ 300:	0d c0       	rjmp	.+26     	; 0x31c <finish>
+
+00000302 <checkZ>:
+
+checkZ:	cpi r20, 0x0c	   	;checks if counter combination matches 
+ 302:	4c 30       	cpi	r20, 0x0C	; 12
+	brne error	   	;the signal combination for morse code Z (last letter)
+ 304:	39 f4       	brne	.+14     	; 0x314 <error>
+	cpi r21, 0x03	  	;if not, this mean that signal does not
+ 306:	53 30       	cpi	r21, 0x03	; 3
+	brne error		;correspond to any letter, hence, go to error
+ 308:	29 f4       	brne	.+10     	; 0x314 <error>
+
+0000030a <combinationZ>:
+
+combinationZ:	
+	ldi r16, _BV(BUTTON)
+ 30a:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 30c:	05 b9       	out	0x05, r16	; 5
+	clr r25
+ 30e:	99 27       	eor	r25, r25
+	ldi r25, CHAR_Z
+ 310:	9a ed       	ldi	r25, 0xDA	; 218
+	rjmp finish
+ 312:	04 c0       	rjmp	.+8      	; 0x31c <finish>
+
+00000314 <error>:
+
+error:
+	ldi r16,_BV(BUTTON)
+ 314:	01 e0       	ldi	r16, 0x01	; 1
+	out PORTB, r16
+ 316:	05 b9       	out	0x05, r16	; 5
+	ldi r25, ERROR		;loads ERROR into register
+ 318:	9e ec       	ldi	r25, 0xCE	; 206
+	rjmp finish
+ 31a:	00 c0       	rjmp	.+0      	; 0x31c <finish>
+
+0000031c <finish>:
+
+finish:	
+	pop r16
+ 31c:	0f 91       	pop	r16
+	clr r19			;clear overflow flag in case it was set
+ 31e:	33 27       	eor	r19, r19
+	ret			
+ 320:	08 95       	ret
